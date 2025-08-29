@@ -15,8 +15,7 @@ struct ContentView: UIViewControllerRepresentable {
     @Environment(\.managedObjectContext) private var viewContext
 
     func makeUIViewController(context: Context) -> UINavigationController {
-        let accordionVC = AccordionViewController()
-        accordionVC.context = self.viewContext
+        let accordionVC = AccordionViewController(context: viewContext)
         let nav = UINavigationController(rootViewController: accordionVC)
         return nav
     }
@@ -25,11 +24,12 @@ struct ContentView: UIViewControllerRepresentable {
 }
 
 
+
 import UIKit
 
 class AccordionViewController: UIViewController, UITableViewDelegate, UITableViewDataSource {
 
-    var context: NSManagedObjectContext?  // ← ここ追加
+    var context: NSManagedObjectContext  // ← ここ追加
 
     let tableView = UITableView()
     
@@ -54,15 +54,84 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         )
 
         // Core Data の context がある場合はそこから読み込む
-        if let context = context {
-            let loadedData = loadMenuFromCoreData(context: context)
-            data = loadedData.isEmpty ? setupSampleData() : loadedData
-        } else {
-            data = setupSampleData()
-        }
+        // Core Data の context がある場合はそこから読み込む
+        let loadedData = loadMenuFromCoreData(context: context)
+        data = loadedData.isEmpty ? setupSampleData() : loadedData
         flatData = flatten(data)
         tableView.reloadData()
+
     }
+    
+    init(context: NSManagedObjectContext) {
+            self.context = context
+            super.init(nibName: nil, bundle: nil)
+        }
+
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+    
+    
+    
+    
+   
+
+    
+    func findEntity(for item: MenuItem, in items: [MenuItem]) -> MenuItemEntity? {
+        for parent in items {
+            if parent === item {
+                return parent.entity  // MenuItem に `var entity: MenuItemEntity?` を保持させておく
+            }
+            if let found = findEntity(for: item, in: parent.children) {
+                return found
+            }
+        }
+        return nil
+    }
+
+    
+    func addChildFolder(to parentItem: MenuItem) {
+        let newEntity = MenuItemEntity(context: context)
+        newEntity.title = "新しいフォルダ"
+        newEntity.isExpanded = false
+
+        // 親を設定
+        newEntity.parent = parentItem.entity
+
+        do {
+            try context.save()
+            
+            // 新しい MenuItem を親の children に追加
+            let newItem = MenuItem(title: newEntity.title ?? "", entity: newEntity)
+            parentItem.children.append(newItem)
+            parentItem.isExpanded = true // 展開状態にする
+            
+            flatData = flatten(data)
+            tableView.reloadData()
+        } catch {
+            print("保存に失敗: \(error)")
+        }
+    }
+
+
+
+
+    
+    // UITableViewDelegate に追加
+    func tableView(_ tableView: UITableView,
+                   contextMenuConfigurationForRowAt indexPath: IndexPath,
+                   point: CGPoint) -> UIContextMenuConfiguration? {
+        
+        let item = flatData[indexPath.row]
+        
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
+            let addFolder = UIAction(title: "フォルダを追加", image: UIImage(systemName: "folder.badge.plus")) { [weak self] _ in
+                self?.addChildFolder(to: item)
+            }
+            return UIMenu(title: "", children: [addFolder])
+        }
+    }
+
 
     // sample data を返すメソッドに変更
     func setupSampleData() -> [MenuItem] {
@@ -82,7 +151,7 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
     }
 
     @objc func addRootFolder() {
-        guard let context = context else { return }
+        //guard let context = context else { return }
         
         let newFolder = MenuItemEntity(context: context)
         newFolder.title = "新しいフォルダ"
@@ -102,7 +171,7 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
     
     func loadMenuFromCoreData(context: NSManagedObjectContext) -> [MenuItem] {
         let request: NSFetchRequest<MenuItemEntity> = MenuItemEntity.fetchRequest()
-        request.predicate = NSPredicate(format: "parent == nil") // ルートのみ取得
+        request.predicate = NSPredicate(format: "parent == nil") // ← ルートのみ取得
         do {
             let roots = try context.fetch(request)
             return roots.map { convert(entity: $0) }
@@ -114,10 +183,15 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
 
     func convert(entity: MenuItemEntity) -> MenuItem {
         let children = entity.children?.allObjects as? [MenuItemEntity] ?? []
-        let menuItem = MenuItem(title: entity.title ?? "", children: children.map { convert(entity: $0) })
+        let menuItem = MenuItem(
+            title: entity.title ?? "",
+            children: children.map { convert(entity: $0) },
+            entity: entity  // ← ここで紐付け
+        )
         menuItem.isExpanded = entity.isExpanded
         return menuItem
     }
+
 
     
     func setupTableView() {
@@ -203,14 +277,15 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
     }
 }
 
-
 class MenuItem {
     let title: String
     var children: [MenuItem] = []
     var isExpanded: Bool = false
+    weak var entity: MenuItemEntity?  // 追加
     
-    init(title: String, children: [MenuItem] = []) {
+    init(title: String, children: [MenuItem] = [], entity: MenuItemEntity? = nil) {
         self.title = title
         self.children = children
+        self.entity = entity
     }
 }
