@@ -94,24 +94,20 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         let newEntity = MenuItemEntity(context: context)
         newEntity.title = "新しいフォルダ"
         newEntity.isExpanded = false
-
-        // 親を設定
         newEntity.parent = parentItem.entity
 
         do {
             try context.save()
-            
-            // 新しい MenuItem を親の children に追加
             let newItem = MenuItem(title: newEntity.title ?? "", entity: newEntity)
             parentItem.children.append(newItem)
-            parentItem.isExpanded = true // 展開状態にする
-            
+            parentItem.isExpanded = true
             flatData = flatten(data)
             tableView.reloadData()
         } catch {
             print("保存に失敗: \(error)")
         }
     }
+
 
 
 
@@ -182,15 +178,19 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
     }
 
     func convert(entity: MenuItemEntity) -> MenuItem {
-        let children = entity.children?.allObjects as? [MenuItemEntity] ?? []
-        let menuItem = MenuItem(
-            title: entity.title ?? "",
-            children: children.map { convert(entity: $0) },
-            entity: entity  // ← ここで紐付け
-        )
+        let menuItem = MenuItem(title: entity.title ?? "", entity: entity)
         menuItem.isExpanded = entity.isExpanded
+
+        // 子を生成
+        let childrenEntities = entity.children?.allObjects as? [MenuItemEntity] ?? []
+        menuItem.children = childrenEntities.map { childEntity in
+            let childItem = convert(entity: childEntity)
+            return childItem
+        }
+
         return menuItem
     }
+
 
 
     
@@ -233,6 +233,8 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         }
         return result
     }
+
+    
     
     // MARK: - UITableViewDataSource
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
