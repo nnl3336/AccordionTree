@@ -61,6 +61,7 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         setupTableView()
         setupFRC()
         performFetchAndReload()
+        setupTableView()
         
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             barButtonSystemItem: .add,
@@ -68,31 +69,92 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
             action: #selector(addRootFolder)
         )
     }
+    
+    enum SortType {
+        case createdAt
+        case title
+        case currentDate
+        case order
+    }
 
-    // MARK: - TableView + Search
+    func sortFlatData(by type: SortType) {
+        switch type {
+        case .createdAt:
+            flatData.sort { ($0.createdAt ?? Date()) < ($1.createdAt ?? Date()) }
+        case .title:
+            flatData.sort { ($0.title ?? "") < ($1.title ?? "") }
+        case .currentDate:
+            flatData.sort { ($0.currentDate ?? Date()) < ($1.currentDate ?? Date()) }
+        case .order:
+            flatData.sort { $0.order < $1.order } // order は Int 型などで管理
+        }
+        tableView.reloadData()
+    }
+
+    
     func setupTableView() {
         tableView.frame = view.bounds
         tableView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         tableView.delegate = self
         tableView.dataSource = self
         tableView.register(AccordionCell.self, forCellReuseIdentifier: "Cell")
-        
-        // 上の検索フィールド
-        let topSearchField = UITextField(frame: CGRect(x: 0, y: 0, width: view.bounds.width, height: 44))
-        topSearchField.placeholder = "上の検索"
-        topSearchField.borderStyle = .roundedRect
-        topSearchField.addTarget(self, action: #selector(topSearchChanged(_:)), for: .editingChanged)
-        
-        // 下の検索フィールド
-        let bottomSearchField = UITextField(frame: CGRect(x: 0, y: 0, width: view.bounds.width, height: 44))
-        bottomSearchField.placeholder = "下の検索"
-        bottomSearchField.borderStyle = .roundedRect
-        bottomSearchField.addTarget(self, action: #selector(bottomSearchChanged(_:)), for: .editingChanged)
-        
-        tableView.tableHeaderView = topSearchField
-        tableView.tableFooterView = bottomSearchField
-        
+
+        // 並び替えボタン
+        let sortButton = UIButton(type: .system)
+        sortButton.setTitle("並び替え", for: .normal)
+        sortButton.menu = UIMenu(title: "並び替え", children: [
+            UIAction(title: "作成日", image: UIImage(systemName: "calendar")) { [weak self] _ in
+                self?.sortFlatData(by: .createdAt)
+            },
+            UIAction(title: "名前", image: UIImage(systemName: "textformat")) { [weak self] _ in
+                self?.sortFlatData(by: .title)
+            },
+            UIAction(title: "追加日", image: UIImage(systemName: "clock")) { [weak self] _ in
+                self?.sortFlatData(by: .currentDate)
+            },
+            UIAction(title: "順番", image: UIImage(systemName: "list.number")) { [weak self] _ in
+                self?.sortFlatData(by: .order)
+            }
+        ])
+        sortButton.showsMenuAsPrimaryAction = true
+        sortButton.heightAnchor.constraint(equalToConstant: 44).isActive = true
+
+        // 検索フィールド
+        let searchField = UITextField()
+        searchField.placeholder = "検索"
+        searchField.borderStyle = .roundedRect
+        searchField.addTarget(self, action: #selector(searchChanged(_:)), for: .editingChanged)
+        searchField.heightAnchor.constraint(equalToConstant: 44).isActive = true
+
+        // StackView
+        let headerStack = UIStackView(arrangedSubviews: [sortButton, searchField])
+        headerStack.axis = .vertical
+        headerStack.spacing = 8
+        headerStack.alignment = .fill
+        headerStack.distribution = .fill
+
+        // 高さを計算
+        let fittingSize = CGSize(width: view.bounds.width, height: UIView.layoutFittingCompressedSize.height)
+        let headerHeight = headerStack.systemLayoutSizeFitting(fittingSize).height
+
+        // frame 設定
+        headerStack.frame = CGRect(x: 0, y: 0, width: view.bounds.width, height: headerHeight)
+        tableView.tableHeaderView = headerStack
+
         view.addSubview(tableView)
+    }
+    
+    @objc func searchChanged(_ sender: UITextField) {
+        let text = sender.text ?? ""
+        topSearchText = text
+        updateFetchPredicate()
+    }
+    
+    // MARK: - 検索用アクション
+    @objc func topSearchChanged(_ sender: UITextField) {
+        guard let text = sender.text else { return }
+        print("上の検索: \(text)")
+        // ここで flatData をフィルタして tableView.reloadData()
     }
 
     // MARK: - FRC
@@ -141,12 +203,8 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         }
         return result
     }
-
-    // MARK: - 検索
-    @objc func topSearchChanged(_ sender: UITextField) {
-        topSearchText = sender.text ?? ""
-        updateFetchPredicate()
-    }
+    
+    
 
     @objc func bottomSearchChanged(_ sender: UITextField) {
         bottomSearchText = sender.text ?? ""
