@@ -26,39 +26,23 @@ struct ContentView: UIViewControllerRepresentable {
 
 
 import UIKit
+import CoreData
 
-class AccordionViewController: UIViewController, UITableViewDelegate, UITableViewDataSource {
+class AccordionViewController: UIViewController, UITableViewDelegate, UITableViewDataSource, NSFetchedResultsControllerDelegate {
 
     var context: NSManagedObjectContext
-
     let tableView = UITableView()
     
-    // 階層データ（ルート）
-    var data: [MenuItemEntity] = []
-    
-    // 表示用フラットデータ
     var flatData: [MenuItemEntity] = []
 
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        view.backgroundColor = .white
-        title = "無限アコーディオン"
+    // FRC
+    var fetchedResultsController: NSFetchedResultsController<MenuItemEntity>!
 
-        setupTableView()
+    // 検索文字列
+    var topSearchText: String = ""
+    var bottomSearchText: String = ""
 
-        navigationItem.rightBarButtonItem = UIBarButtonItem(
-            barButtonSystemItem: .add,
-            target: self,
-            action: #selector(addRootFolder)
-        )
-
-        // Core Data からロード
-        let loadedData = loadRoots()
-        data = loadedData.isEmpty ? setupSampleData() : loadedData
-        flatData = flatten(data)
-        tableView.reloadData()
-    }
-    
+    // MARK: - Init
     init(context: NSManagedObjectContext) {
         self.context = context
         super.init(nibName: nil, bundle: nil)
@@ -67,128 +51,83 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
-    
-    func toggleItem(_ item: MenuItemEntity) {
-        guard let row = flatData.firstIndex(of: item) else { return }
-        let children = (item.children?.allObjects as? [MenuItemEntity]) ?? []
 
-        item.isExpanded.toggle()
+    // MARK: - View
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .white
+        title = "無限アコーディオン"
 
-        tableView.beginUpdates()
-        if item.isExpanded {
-            var indexPaths: [IndexPath] = []
-            for i in 0..<children.count {
-                indexPaths.append(IndexPath(row: row + i + 1, section: 0))
-            }
-            flatData.insert(contentsOf: children, at: row + 1)
-            tableView.insertRows(at: indexPaths, with: .fade)
-        } else {
-            let indexPaths = (1...children.count).map { IndexPath(row: row + $0, section: 0) }
-            flatData.removeSubrange((row + 1)...(row + children.count))
-            tableView.deleteRows(at: indexPaths, with: .fade)
-        }
-        tableView.endUpdates()
-
-        // 矢印の回転アニメーション
-        if let cell = tableView.cellForRow(at: IndexPath(row: row, section: 0)) as? AccordionCell {
-            UIView.animate(withDuration: 0.25) {
-                cell.arrowImageView.transform = item.isExpanded
-                    ? CGAffineTransform(rotationAngle: .pi/2)
-                    : .identity
-            }
-        }
+        setupTableView()
+        setupFRC()
+        performFetchAndReload()
+        
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            barButtonSystemItem: .add,
+            target: self,
+            action: #selector(addRootFolder)
+        )
     }
 
-    
-    func tableView(_ tableView: UITableView,
-                   contextMenuConfigurationForRowAt indexPath: IndexPath,
-                   point: CGPoint) -> UIContextMenuConfiguration? {
-        let item = flatData[indexPath.row]
-        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
-            let addFolder = UIAction(title: "フォルダを追加", image: UIImage(systemName: "folder.badge.plus")) { [weak self] _ in
-                self?.addChildFolder(to: item)
-            }
-            return UIMenu(title: "", children: [addFolder])
-        }
+    // MARK: - TableView + Search
+    func setupTableView() {
+        tableView.frame = view.bounds
+        tableView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        tableView.delegate = self
+        tableView.dataSource = self
+        tableView.register(AccordionCell.self, forCellReuseIdentifier: "Cell")
+        
+        // 上の検索フィールド
+        let topSearchField = UITextField(frame: CGRect(x: 0, y: 0, width: view.bounds.width, height: 44))
+        topSearchField.placeholder = "上の検索"
+        topSearchField.borderStyle = .roundedRect
+        topSearchField.addTarget(self, action: #selector(topSearchChanged(_:)), for: .editingChanged)
+        
+        // 下の検索フィールド
+        let bottomSearchField = UITextField(frame: CGRect(x: 0, y: 0, width: view.bounds.width, height: 44))
+        bottomSearchField.placeholder = "下の検索"
+        bottomSearchField.borderStyle = .roundedRect
+        bottomSearchField.addTarget(self, action: #selector(bottomSearchChanged(_:)), for: .editingChanged)
+        
+        tableView.tableHeaderView = topSearchField
+        tableView.tableFooterView = bottomSearchField
+        
+        view.addSubview(tableView)
     }
 
-    
-    // セルのコンテキストメニューから呼ばれる子追加
-    func addChildFolder(to parent: MenuItemEntity) {
-        let newEntity = MenuItemEntity(context: context)
-        newEntity.title = "新しいフォルダ"
-        newEntity.isExpanded = false
+    // MARK: - FRC
+    func setupFRC() {
+        let request: NSFetchRequest<MenuItemEntity> = MenuItemEntity.fetchRequest()
+        request.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
+        request.predicate = NSPredicate(format: "parent == nil")
+        
+        fetchedResultsController = NSFetchedResultsController(
+            fetchRequest: request,
+            managedObjectContext: context,
+            sectionNameKeyPath: nil,
+            cacheName: nil
+        )
+        fetchedResultsController.delegate = self
+    }
 
-        // 親子関係
-        parent.addToChildren(newEntity)
-        newEntity.parent = parent
-
-        // 追加したら親を展開状態にする
-        parent.isExpanded = true
-
+    func performFetchAndReload() {
         do {
-            try context.save()
-            // 再ロード/再構築して表示を更新
-            data = loadRoots()
-            flatData = flatten(data)
-            tableView.reloadData()
-
-            // 追加した子の行までスクロールしたい場合
-            if let index = flatData.firstIndex(of: newEntity) {
-                tableView.scrollToRow(at: IndexPath(row: index, section: 0), at: .middle, animated: true)
+            try fetchedResultsController.performFetch()
+            if let roots = fetchedResultsController.fetchedObjects {
+                flatData = flatten(roots)
+                tableView.reloadData()
             }
-
         } catch {
-            print("保存失敗: \(error)")
+            print("FRC fetch error: \(error)")
         }
     }
 
-    // コンテキストメニューで削除したいとき用
-    func delete(item: MenuItemEntity) {
-        // Core Data から削除（子も cascade 設定なら一緒に消えます）
-        context.delete(item)
-        do {
-            try context.save()
-            data = loadRoots()
-            flatData = flatten(data)
+    func controllerDidChangeContent(_ controller: NSFetchedResultsController<NSFetchRequestResult>) {
+        if let roots = controller.fetchedObjects as? [MenuItemEntity] {
+            flatData = flatten(roots)
             tableView.reloadData()
-        } catch {
-            print("削除失敗: \(error)")
         }
     }
-
-    
-    // MARK: - UITableViewDelegate (Context Menu)
-    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let item = flatData[indexPath.row]
-        let cell = tableView.dequeueReusableCell(withIdentifier: "Cell", for: indexPath) as! AccordionCell
-        cell.textLabel?.text = item.title
-        cell.indentationLevel = level(for: item)
-
-        if (item.children?.count ?? 0) > 0 {
-            cell.arrowImageView.isHidden = false
-            let angle: CGFloat = item.isExpanded ? .pi/2 : 0
-            cell.arrowImageView.transform = CGAffineTransform(rotationAngle: angle)
-
-            cell.onArrowTapped = { [weak self, weak cell] in
-                guard let self = self, let cell = cell else { return }
-                item.isExpanded.toggle()
-                try? self.context.save()
-                self.flatData = self.flatten(self.data)
-
-                UIView.animate(withDuration: 0.25) {
-                    cell.arrowImageView.transform = item.isExpanded ? CGAffineTransform(rotationAngle: .pi/2) : .identity
-                }
-
-                self.tableView.reloadData()
-            }
-        } else {
-            cell.arrowImageView.isHidden = true
-        }
-
-        return cell
-    }
-
 
     // MARK: - Flatten
     func flatten(_ items: [MenuItemEntity]) -> [MenuItemEntity] {
@@ -203,82 +142,74 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         return result
     }
 
-    // MARK: - Core Data
-    func loadRoots() -> [MenuItemEntity] {
-        let request: NSFetchRequest<MenuItemEntity> = MenuItemEntity.fetchRequest()
-        request.predicate = NSPredicate(format: "parent == nil")
-        do {
-            return try context.fetch(request)
-        } catch {
-            print("fetch error: \(error)")
-            return []
-        }
+    // MARK: - 検索
+    @objc func topSearchChanged(_ sender: UITextField) {
+        topSearchText = sender.text ?? ""
+        updateFetchPredicate()
     }
 
-    // Core Data でサンプルデータを作成
-    func setupSampleData() -> [MenuItemEntity] {
-        let fruit = MenuItemEntity(context: context)
-        fruit.title = "Fruit"
-        fruit.isExpanded = false
-
-        let apple = MenuItemEntity(context: context)
-        apple.title = "Apple"
-        apple.parent = fruit
-        fruit.addToChildren(apple)
-
-        let banana = MenuItemEntity(context: context)
-        banana.title = "Banana"
-        banana.parent = fruit
-        fruit.addToChildren(banana)
-
-        let vegetables = MenuItemEntity(context: context)
-        vegetables.title = "Vegetables"
-        vegetables.isExpanded = false
-
-        let carrot = MenuItemEntity(context: context)
-        carrot.title = "Carrot"
-        carrot.parent = vegetables
-        vegetables.addToChildren(carrot)
-
-        do {
-            try context.save()
-        } catch {
-            print("保存失敗: \(error)")
-        }
-
-        return [fruit, vegetables]
+    @objc func bottomSearchChanged(_ sender: UITextField) {
+        bottomSearchText = sender.text ?? ""
+        updateFetchPredicate()
     }
 
-    @objc func addRootFolder() {
-        let newFolder = MenuItemEntity(context: context)
-        newFolder.title = "新しいフォルダ"
-        newFolder.isExpanded = false
-        newFolder.parent = nil
-
-        do {
-            try context.save()
-            data = loadRoots()
-            flatData = flatten(data)
-            tableView.reloadData()
-        } catch {
-            print("保存に失敗: \(error)")
+    func updateFetchPredicate() {
+        var predicates: [NSPredicate] = [NSPredicate(format: "parent == nil")]
+        if !topSearchText.isEmpty {
+            predicates.append(NSPredicate(format: "title CONTAINS[cd] %@", topSearchText))
         }
+        if !bottomSearchText.isEmpty {
+            predicates.append(NSPredicate(format: "title CONTAINS[cd] %@", bottomSearchText))
+        }
+        fetchedResultsController.fetchRequest.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
+        performFetchAndReload()
     }
 
-    // MARK: - UITableViewDataSource
+    // MARK: - TableView DataSource
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         return flatData.count
     }
 
-    @objc func arrowTapped(_ sender: UITapGestureRecognizer) {
-        guard let row = sender.view?.tag else { return }
-        let item = flatData[row]
-        item.isExpanded.toggle()
-        flatData = flatten(data)
-        tableView.reloadData()
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+
+        let item = flatData[indexPath.row]
+        let cell = tableView.dequeueReusableCell(withIdentifier: "Cell", for: indexPath) as! AccordionCell
+        cell.textLabel?.text = item.title
+        cell.indentationLevel = level(for: item)
+        cell.arrowImageView.isHidden = (item.children?.count ?? 0) == 0
+        cell.arrowImageView.transform = item.isExpanded ? CGAffineTransform(rotationAngle: .pi/2) : .identity
+
+        cell.onArrowTapped = { [weak self, weak cell] in
+            guard let self = self, let cell = cell else { return }
+            item.isExpanded.toggle()
+            try? self.context.save()
+            self.flatData = self.flatten(self.fetchedResultsController.fetchedObjects ?? [])
+            UIView.animate(withDuration: 0.25) {
+                cell.arrowImageView.transform = item.isExpanded ? CGAffineTransform(rotationAngle: .pi/2) : .identity
+            }
+            self.tableView.reloadData()
+        }
+
+        return cell
     }
 
-    // MARK: - 階層レベル計算
+    // MARK: - Context Menu
+    func tableView(_ tableView: UITableView, contextMenuConfigurationForRowAt indexPath: IndexPath, point: CGPoint) -> UIContextMenuConfiguration? {
+
+        let item = flatData[indexPath.row]
+
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
+            let addFolder = UIAction(title: "フォルダ追加", image: UIImage(systemName: "folder.badge.plus")) { [weak self] _ in
+                self?.addChildFolder(to: item)
+            }
+            let delete = UIAction(title: "削除", image: UIImage(systemName: "trash"), attributes: .destructive) { [weak self] _ in
+                self?.delete(item: item)
+            }
+            return UIMenu(title: "", children: [addFolder, delete])
+        }
+    }
+
+    // MARK: - Hierarchy Helpers
     func level(for item: MenuItemEntity) -> Int {
         var level = 0
         var current = item.parent
@@ -289,13 +220,45 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         return level
     }
 
-    func setupTableView() {
-        tableView.frame = view.bounds
-        tableView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        tableView.delegate = self
-        tableView.dataSource = self
-        tableView.register(AccordionCell.self, forCellReuseIdentifier: "Cell") // ←ここ
-        view.addSubview(tableView)
+    func addChildFolder(to parent: MenuItemEntity) {
+        let newEntity = MenuItemEntity(context: context)
+        newEntity.title = "新しいフォルダ"
+        newEntity.isExpanded = false
+        parent.addToChildren(newEntity)
+        newEntity.parent = parent
+        parent.isExpanded = true
+
+        do {
+            try context.save()
+            flatData = flatten(fetchedResultsController.fetchedObjects ?? [])
+            tableView.reloadData()
+            if let index = flatData.firstIndex(of: newEntity) {
+                tableView.scrollToRow(at: IndexPath(row: index, section: 0), at: .middle, animated: true)
+            }
+        } catch {
+            print("保存失敗: \(error)")
+        }
+    }
+
+    func delete(item: MenuItemEntity) {
+        context.delete(item)
+        do {
+            try context.save()
+        } catch {
+            print("削除失敗: \(error)")
+        }
+    }
+
+    @objc func addRootFolder() {
+        let newFolder = MenuItemEntity(context: context)
+        newFolder.title = "新しいフォルダ"
+        newFolder.isExpanded = false
+        newFolder.parent = nil
+        do {
+            try context.save()
+        } catch {
+            print("保存失敗: \(error)")
+        }
     }
 }
 
