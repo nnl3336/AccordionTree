@@ -300,8 +300,16 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         let searchField = UITextField()
         searchField.placeholder = "検索"
         searchField.borderStyle = .roundedRect
+        searchField.autocapitalizationType = .none
+        searchField.clearButtonMode = .whileEditing  // ×ボタン
+        searchField.leftViewMode = .always
+
+        // 検索アイコンを左に追加
+        let imageView = UIImageView(image: UIImage(systemName: "magnifyingglass"))
+        imageView.tintColor = .gray
+        searchField.leftView = imageView
+
         searchField.addTarget(self, action: #selector(searchChanged(_:)), for: .editingChanged)
-        searchField.heightAnchor.constraint(equalToConstant: 44).isActive = true
 
         // ヘッダースタックにボタンと検索フィールドを縦に並べる
         let headerStack = UIStackView(arrangedSubviews: [sortButton, searchField])
@@ -431,8 +439,35 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
 
         return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
             let addFolder = UIAction(title: "フォルダ追加", image: UIImage(systemName: "folder.badge.plus")) { [weak self] _ in
-                self?.addChildFolder(to: item)
+                guard let self = self else { return }
+
+                // アラートを作成
+                let alert = UIAlertController(title: "フォルダ名を入力", message: nil, preferredStyle: .alert)
+                
+                // テキストフィールドを追加
+                alert.addTextField { textField in
+                    textField.placeholder = "新しいフォルダ名"
+                }
+                
+                // 「追加」ボタン
+                let addAction = UIAlertAction(title: "追加", style: .default) { _ in
+                    if let folderName = alert.textFields?.first?.text, !folderName.isEmpty {
+                        self.addChildFolder(to: item, name: folderName)
+                    }
+                }
+                
+                // 「キャンセル」ボタン
+                let cancelAction = UIAlertAction(title: "キャンセル", style: .cancel)
+                
+                alert.addAction(addAction)
+                alert.addAction(cancelAction)
+                
+                // アラートを表示
+                if let vc = self.presentingViewController ?? self as? UIViewController {
+                    vc.present(alert, animated: true)
+                }
             }
+
             let delete = UIAction(title: "削除", image: UIImage(systemName: "trash"), attributes: .destructive) { [weak self] _ in
                 self?.delete(item: item)
             }
@@ -452,9 +487,10 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
     }
 
     // MARK: - 子フォルダ追加
-    func addChildFolder(to parent: MenuItemEntity) {
+    func addChildFolder(to parent: MenuItemEntity
+                        , name: String) {
         let newEntity = MenuItemEntity(context: context)
-        newEntity.title = "新しいフォルダ"
+        newEntity.title = name  // ここで引数 name を使う
         newEntity.isExpanded = false
         parent.addToChildren(newEntity)
         newEntity.parent = parent
