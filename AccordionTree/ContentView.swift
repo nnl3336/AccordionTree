@@ -408,70 +408,116 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         return flatData.count
     }
+    
+    //セルタップ
+    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        let item = flatData[indexPath.row]
 
+        if !selectedItems.isEmpty {
+            // 選択モード中 → トグル
+            if selectedItems.contains(item) {
+                selectedItems.remove(item)
+            } else {
+                selectedItems.insert(item)
+            }
+
+            // 色を更新
+            tableView.reloadRows(at: [indexPath], with: .none)
+        } else {
+            // 選択モードでない → 通常の遷移
+            //showDetail(for: item)
+        }
+
+        tableView.deselectRow(at: indexPath, animated: true)
+    }
+
+
+    //表示セルテキスト
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
 
         let item = flatData[indexPath.row]
         let cell = tableView.dequeueReusableCell(withIdentifier: "Cell", for: indexPath) as! AccordionCell
+
         cell.textLabel?.text = item.title
         cell.indentationLevel = level(for: item)
         cell.arrowImageView.isHidden = (item.children?.count ?? 0) == 0
         cell.arrowImageView.transform = item.isExpanded ? CGAffineTransform(rotationAngle: .pi/2) : .identity
+
+        // 選択状態に応じて背景色を変更
+        if selectedItems.contains(item) {
+            cell.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.3)
+        } else {
+            cell.backgroundColor = .clear
+        }
 
         cell.onArrowTapped = { [weak self, weak cell] in
             guard let self = self, let cell = cell else { return }
             item.isExpanded.toggle()
             try? self.context.save()
             self.flatData = self.flatten(self.fetchedResultsController.fetchedObjects ?? [])
+
             UIView.animate(withDuration: 0.25) {
                 cell.arrowImageView.transform = item.isExpanded ? CGAffineTransform(rotationAngle: .pi/2) : .identity
             }
+
             self.tableView.reloadData()
         }
 
         return cell
     }
 
-    // MARK: - コンテキストメニュー
-    func tableView(_ tableView: UITableView, contextMenuConfigurationForRowAt indexPath: IndexPath, point: CGPoint) -> UIContextMenuConfiguration? {
+    var selectedItems = Set<MenuItemEntity>()
+
+    // MARK: - コンテキストメニュー　.contextMenu
+    func tableView(_ tableView: UITableView,
+                   contextMenuConfigurationForRowAt indexPath: IndexPath,
+                   point: CGPoint) -> UIContextMenuConfiguration? {
 
         let item = flatData[indexPath.row]
 
-        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
-            let addFolder = UIAction(title: "フォルダ追加", image: UIImage(systemName: "folder.badge.plus")) { [weak self] _ in
-                guard let self = self else { return }
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+            guard let self = self else { return nil }
 
-                // アラートを作成
+            // フォルダ追加アクション
+            let addFolder = UIAction(title: "フォルダ追加", image: UIImage(systemName: "folder.badge.plus")) { _ in
                 let alert = UIAlertController(title: "フォルダ名を入力", message: nil, preferredStyle: .alert)
-                
-                // テキストフィールドを追加
                 alert.addTextField { textField in
                     textField.placeholder = "新しいフォルダ名"
                 }
-                
-                // 「追加」ボタン
                 let addAction = UIAlertAction(title: "追加", style: .default) { _ in
                     if let folderName = alert.textFields?.first?.text, !folderName.isEmpty {
                         self.addChildFolder(to: item, name: folderName)
                     }
                 }
-                
-                // 「キャンセル」ボタン
                 let cancelAction = UIAlertAction(title: "キャンセル", style: .cancel)
-                
                 alert.addAction(addAction)
                 alert.addAction(cancelAction)
-                
-                // アラートを表示
                 if let vc = self.presentingViewController ?? self as? UIViewController {
                     vc.present(alert, animated: true)
                 }
             }
 
-            let delete = UIAction(title: "削除", image: UIImage(systemName: "trash"), attributes: .destructive) { [weak self] _ in
-                self?.delete(item: item)
+            // 選択/トグルアクション
+            let selectAction = UIAction(title: "選択/トグル") { _ in
+                if self.selectedItems.isEmpty {
+                    self.selectedItems.insert(item)   // 最初の選択
+                } else {
+                    if self.selectedItems.contains(item) {
+                        self.selectedItems.remove(item)  // トグルで解除
+                    } else {
+                        self.selectedItems.insert(item)  // トグルで追加
+                    }
+                }
+                tableView.reloadRows(at: [indexPath], with: .none)
             }
-            return UIMenu(title: "", children: [addFolder, delete])
+
+            // 削除アクション
+            let delete = UIAction(title: "削除", image: UIImage(systemName: "trash"), attributes: .destructive) { _ in
+                self.delete(item: item)
+            }
+
+            // メニューに追加
+            return UIMenu(title: "", children: [addFolder, selectAction, delete])
         }
     }
 
