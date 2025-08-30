@@ -68,6 +68,19 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         fatalError("init(coder:) has not been implemented")
     }
     
+    func tableView(_ tableView: UITableView,
+                   contextMenuConfigurationForRowAt indexPath: IndexPath,
+                   point: CGPoint) -> UIContextMenuConfiguration? {
+        let item = flatData[indexPath.row]
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
+            let addFolder = UIAction(title: "フォルダを追加", image: UIImage(systemName: "folder.badge.plus")) { [weak self] _ in
+                self?.addChildFolder(to: item)
+            }
+            return UIMenu(title: "", children: [addFolder])
+        }
+    }
+
+    
     // セルのコンテキストメニューから呼ばれる子追加
     func addChildFolder(to parent: MenuItemEntity) {
         let newEntity = MenuItemEntity(context: context)
@@ -114,34 +127,34 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
 
     
     // MARK: - UITableViewDelegate (Context Menu)
-    func tableView(
-        _ tableView: UITableView,
-        contextMenuConfigurationForRowAt indexPath: IndexPath,
-        point: CGPoint
-    ) -> UIContextMenuConfiguration? {
-        
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let item = flatData[indexPath.row]
+        let cell = tableView.dequeueReusableCell(withIdentifier: "Cell", for: indexPath) as! AccordionCell
+        cell.textLabel?.text = item.title
+        cell.indentationLevel = level(for: item)
 
-        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
-            // フォルダ追加
-            let addFolder = UIAction(
-                title: "子フォルダを追加",
-                image: UIImage(systemName: "folder.badge.plus")
-            ) { [weak self] _ in
-                self?.addChildFolder(to: item)
+        if (item.children?.count ?? 0) > 0 {
+            cell.arrowImageView.isHidden = false
+            let angle: CGFloat = item.isExpanded ? .pi/2 : 0
+            cell.arrowImageView.transform = CGAffineTransform(rotationAngle: angle)
+
+            cell.onArrowTapped = { [weak self, weak cell] in
+                guard let self = self, let cell = cell else { return }
+                item.isExpanded.toggle()
+                try? self.context.save()
+                self.flatData = self.flatten(self.data)
+
+                UIView.animate(withDuration: 0.25) {
+                    cell.arrowImageView.transform = item.isExpanded ? CGAffineTransform(rotationAngle: .pi/2) : .identity
+                }
+
+                self.tableView.reloadData()
             }
-
-            // 削除
-            let delete = UIAction(
-                title: "削除",
-                image: UIImage(systemName: "trash"),
-                attributes: .destructive
-            ) { [weak self] _ in
-                self?.delete(item: item)
-            }
-
-            return UIMenu(title: "", children: [addFolder, delete])
+        } else {
+            cell.arrowImageView.isHidden = true
         }
+
+        return cell
     }
 
 
@@ -225,34 +238,10 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         return flatData.count
     }
 
-    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let item = flatData[indexPath.row]
-        let cell = tableView.dequeueReusableCell(withIdentifier: "Cell", for: indexPath) as! AccordionCell
-        cell.textLabel?.text = item.title
-        cell.indentationLevel = level(for: item)
-        cell.setExpanded(item.isExpanded)
-
-        // 矢印だけタップ
-        let tap = UITapGestureRecognizer(target: self, action: #selector(arrowTapped(_:)))
-        cell.arrowImageView.addGestureRecognizer(tap)
-        cell.arrowImageView.tag = indexPath.row
-        return cell
-    }
-
     @objc func arrowTapped(_ sender: UITapGestureRecognizer) {
         guard let row = sender.view?.tag else { return }
         let item = flatData[row]
         item.isExpanded.toggle()
-        flatData = flatten(data)
-        tableView.reloadData()
-    }
-
-
-    // MARK: - UITableViewDelegate
-    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        let item = flatData[indexPath.row]
-        item.isExpanded.toggle()
-        do { try context.save() } catch { print(error) }
         flatData = flatten(data)
         tableView.reloadData()
     }
@@ -293,27 +282,38 @@ class MenuItem {
 
 class AccordionCell: UITableViewCell {
     let arrowImageView = UIImageView()
-    
+    var onArrowTapped: (() -> Void)?
+
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
         setupArrow()
     }
-    
-    required init?(coder: NSCoder) { fatalError() }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     private func setupArrow() {
         arrowImageView.translatesAutoresizingMaskIntoConstraints = false
+        arrowImageView.image = UIImage(systemName: "chevron.right") // 初期は右向き
+        arrowImageView.tintColor = .gray
         contentView.addSubview(arrowImageView)
+
         NSLayoutConstraint.activate([
             arrowImageView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
             arrowImageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             arrowImageView.widthAnchor.constraint(equalToConstant: 16),
             arrowImageView.heightAnchor.constraint(equalToConstant: 16)
         ])
+
         arrowImageView.isUserInteractionEnabled = true
+        let tap = UITapGestureRecognizer(target: self, action: #selector(arrowTapped))
+        tap.cancelsTouchesInView = false  // ← これが重要
+        arrowImageView.addGestureRecognizer(tap)
+
     }
 
-    func setExpanded(_ expanded: Bool) {
-        arrowImageView.image = UIImage(systemName: expanded ? "chevron.down" : "chevron.right")
+    @objc private func arrowTapped() {
+        onArrowTapped?()
     }
 }
