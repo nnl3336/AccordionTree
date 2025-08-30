@@ -208,6 +208,80 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
             set { UserDefaults.standard.set(newValue, forKey: "ascending") }
         }
     
+    func updateTableHeader() {
+        // 並び替えボタンを作り直す
+        let sortButton = UIButton(type: .system)
+        sortButton.setTitle("並び替え", for: .normal)
+        sortButton.menu = makeSortMenu()
+        sortButton.showsMenuAsPrimaryAction = true
+        sortButton.heightAnchor.constraint(equalToConstant: 44).isActive = true
+
+        // 検索フィールドを作り直す（必要なら再利用でもOK）
+        let searchField = UITextField(frame: .zero)
+        searchField.placeholder = "検索"
+        searchField.borderStyle = .roundedRect
+        searchField.heightAnchor.constraint(equalToConstant: 44).isActive = true
+        searchField.addTarget(self, action: #selector(searchChanged(_:)), for: .editingChanged)
+
+        // コンテナStackを組み直す
+        let container = UIStackView(arrangedSubviews: [sortButton, searchField])
+        container.axis = .vertical
+        container.spacing = 4
+        container.frame = CGRect(x: 0, y: 0, width: view.bounds.width, height: 92)
+
+        tableView.tableHeaderView = container
+    }
+
+    // メニュー生成用の関数
+    func makeSortMenu() -> UIMenu {
+        return UIMenu(title: "並び替え", children: [
+            UIAction(
+                title: "作成日",
+                image: UIImage(systemName: "calendar"),
+                state: currentSort == .createdAt ? .on : .off
+            ) { [weak self] _ in
+                self?.sortFlatData(by: .createdAt)
+                self?.updateTableHeader()
+            },
+            UIAction(
+                title: "名前",
+                image: UIImage(systemName: "textformat"),
+                state: currentSort == .title ? .on : .off
+            ) { [weak self] _ in
+                self?.sortFlatData(by: .title)
+                self?.updateTableHeader()
+            },
+            UIAction(
+                title: "追加日",
+                image: UIImage(systemName: "clock"),
+                state: currentSort == .currentDate ? .on : .off
+            ) { [weak self] _ in
+                self?.sortFlatData(by: .currentDate)
+                self?.updateTableHeader()
+            },
+            UIAction(
+                title: "順番",
+                image: UIImage(systemName: "list.number"),
+                state: currentSort == .order ? .on : .off
+            ) { [weak self] _ in
+                self?.sortFlatData(by: .order)
+                self?.updateTableHeader()
+            },
+            // 昇順／降順の切り替えはタイトルで表現
+            UIAction(
+                title: ascending ? "昇順 (A→Z)" : "降順 (Z→A)",
+                state: .off // ここはチェック不要（トグル扱いだから）
+            ) { [weak self] _ in
+                guard let self = self else { return }
+                self.ascending.toggle()
+                self.sortFlatData(by: self.currentSort)
+                self.updateTableHeader()
+            }
+        ])
+    }
+
+    
+    // MARK: - テーブルビュー初期設定
     // MARK: - テーブルビュー初期設定
     func setupTableView() {
         tableView.frame = view.bounds
@@ -219,49 +293,8 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         // 並び替えボタン(UIMenu付き)
         let sortButton = UIButton(type: .system)
         sortButton.setTitle("並び替え", for: .normal)
-        
-        // ← クラスの外に extension を置く
-        extension String {
-            func textToImage(font: UIFont = .systemFont(ofSize: 17)) -> UIImage? {
-                let size = self.size(withAttributes: [.font: font])
-                UIGraphicsBeginImageContextWithOptions(size, false, 0)
-                UIColor.label.set()
-                self.draw(at: .zero, withAttributes: [.font: font])
-                let image = UIGraphicsGetImageFromCurrentImageContext()
-                UIGraphicsEndImageContext()
-                return image
-            }
-        }
-
-        // メニュー生成用の関数
-        func makeSortMenu() -> UIMenu {
-            // アイコンを昇順なら「A」、降順なら「Z」に
-            let symbol = ascending ? "A" : "D"
-            let config = UIImage.SymbolConfiguration(pointSize: 16, weight: .bold)
-            let icon = symbol.textToImage(font: .systemFont(ofSize: 16, weight: .bold))
-
-            return UIMenu(title: "並び替え", children: [
-                UIAction(title: "作成日", image: UIImage(systemName: "calendar")) { [weak self] _ in
-                    self?.sortFlatData(by: .createdAt)
-                },
-                UIAction(title: "名前", image: UIImage(systemName: "textformat")) { [weak self] _ in
-                    self?.sortFlatData(by: .title)
-                },
-                UIAction(title: "追加日", image: UIImage(systemName: "clock")) { [weak self] _ in
-                    self?.sortFlatData(by: .currentDate)
-                },
-                UIAction(title: "順番", image: UIImage(systemName: "list.number")) { [weak self] _ in
-                    self?.sortFlatData(by: .order)
-                },
-                UIAction(title: ascending ? "昇順" : "降順", image: icon) { [weak self] _ in
-                    guard let self = self else { return }
-                    self.ascending.toggle()
-                    self.sortFlatData(by: self.currentSort)
-                    self.updateTableHeader()   // メニュー更新
-                }
-            ])
-        }
-
+        sortButton.menu = makeSortMenu()              // メニューを追加
+        sortButton.showsMenuAsPrimaryAction = true    // 長押しじゃなくタップで出るようにする
 
         // 検索フィールド
         let searchField = UITextField()
@@ -277,7 +310,6 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         headerStack.alignment = .fill
         headerStack.distribution = .fill
 
-        // 高さを計算してframeに反映
         let fittingSize = CGSize(width: view.bounds.width, height: UIView.layoutFittingCompressedSize.height)
         let headerHeight = headerStack.systemLayoutSizeFitting(fittingSize).height
         headerStack.frame = CGRect(x: 0, y: 0, width: view.bounds.width, height: headerHeight)
