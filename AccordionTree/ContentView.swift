@@ -42,7 +42,8 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
     var topSearchText: String = ""
     var bottomSearchText: String = ""
 
-    // MARK: - Init
+    // MARK: - 初期化
+    // コンテキストを受け取ってビューコントローラを初期化
     init(context: NSManagedObjectContext) {
         self.context = context
         super.init(nibName: nil, bundle: nil)
@@ -52,17 +53,18 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         fatalError("init(coder:) has not been implemented")
     }
 
-    // MARK: - View
+    // MARK: - Viewのセットアップ
+    // viewDidLoadでテーブルビューとFRCをセットアップし、ナビゲーションボタンを追加
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .white
         title = "無限アコーディオン"
 
-        setupTableView()
-        setupFRC()
-        performFetchAndReload()
-        setupTableView()
-        
+        setupTableView()       // テーブルビューの初期設定
+        setupFRC()             // FRCの初期設定
+        performFetchAndReload()// データを取得してフラット化
+        setupTableView()       // 再度テーブルビュー設定（ヘッダー更新など）
+
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             barButtonSystemItem: .add,
             target: self,
@@ -70,6 +72,92 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         )
     }
     
+    // MARK: - 検索結果更新
+    // 入力された検索文字列に基づき、フラット化されたデータを更新
+    func updateSearchResults() {
+        let roots = fetchedResultsController.fetchedObjects ?? []
+        flatData = flattenWithSearch(roots, keyword: topSearchText)
+        tableView.reloadData()
+    }
+
+    // MARK: - 階層を再帰的にフラット化（検索対応）
+    func flattenWithSearch(_ items: [MenuItemEntity], keyword: String?) -> [MenuItemEntity] {
+        var result: [MenuItemEntity] = []
+        
+        for item in items {
+            let children = (item.children?.allObjects as? [MenuItemEntity]) ?? []
+            let filteredChildren = flattenWithSearch(children, keyword: keyword)
+            
+            let matchSelf = keyword.map { item.title?.localizedCaseInsensitiveContains($0) ?? false } ?? true
+            
+            if matchSelf || !filteredChildren.isEmpty {
+                if !filteredChildren.isEmpty {
+                    item.isExpanded = true  // 子がマッチしたら親を展開
+                }
+                result.append(item)
+                result.append(contentsOf: filteredChildren)
+            }
+        }
+        
+        return result
+    }
+
+    // MARK: - テーブルビューの削除ボタン設定
+    func tableView(_ tableView: UITableView,
+                   editingStyleForRowAt indexPath: IndexPath) -> UITableViewCell.EditingStyle {
+        if tableView.isEditing {
+            // 並べ替えモードでは削除ボタンを出さない
+            return .none
+        } else {
+            // 通常は削除可能
+            return .delete
+        }
+    }
+
+    // MARK: - スワイプで削除
+    func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        if currentSort == .order {
+            // 並べ替え中は削除不可
+            return nil
+        }
+        
+        let deleteAction = UIContextualAction(style: .destructive, title: "削除") { [weak self] _, _, completion in
+            guard let self = self else { return }
+            let item = self.flatData[indexPath.row]
+            self.context.delete(item)
+            try? self.context.save()
+            completion(true)
+        }
+        
+        return UISwipeActionsConfiguration(actions: [deleteAction])
+    }
+
+    // MARK: - セルの移動可否
+    func tableView(_ tableView: UITableView, canMoveRowAt indexPath: IndexPath) -> Bool {
+        // 現在のソートが「順番」のときだけ移動可能
+        return currentSort == .order
+    }
+
+    // MARK: - セル移動時の処理
+    func tableView(_ tableView: UITableView, moveRowAt sourceIndexPath: IndexPath, to destinationIndexPath: IndexPath) {
+        guard currentSort == .order else { return }
+        
+        let movedItem = flatData.remove(at: sourceIndexPath.row)
+        flatData.insert(movedItem, at: destinationIndexPath.row)
+        
+        // 並び順(order)を更新
+        for (index, item) in flatData.enumerated() {
+            item.order = Int16(index)
+        }
+        
+        do {
+            try context.save()
+        } catch {
+            print("保存失敗: \(error)")
+        }
+    }
+
+    // MARK: - ソートタイプ定義
     enum SortType {
         case createdAt
         case title
@@ -77,21 +165,35 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         case order
     }
 
+    var currentSort: SortType = .createdAt
+
+    // MARK: - データをソート
     func sortFlatData(by type: SortType) {
+        currentSort = type
+        
         switch type {
         case .createdAt:
             flatData.sort { ($0.createdAt ?? Date()) < ($1.createdAt ?? Date()) }
+            tableView.isEditing = false
         case .title:
             flatData.sort { ($0.title ?? "") < ($1.title ?? "") }
+            tableView.isEditing = false
         case .currentDate:
             flatData.sort { ($0.currentDate ?? Date()) < ($1.currentDate ?? Date()) }
+            tableView.isEditing = false
         case .order:
-            flatData.sort { $0.order < $1.order } // order は Int 型などで管理
+            flatData.sort { $0.order < $1.order }
+            tableView.isEditing = true
         }
+        
         tableView.reloadData()
     }
 
     
+    // 並べ替え昇順 / 降順用
+    var ascending: Bool = true  // ここを追加
+    
+    // MARK: - テーブルビュー初期設定
     func setupTableView() {
         tableView.frame = view.bounds
         tableView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -99,25 +201,38 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         tableView.dataSource = self
         tableView.register(AccordionCell.self, forCellReuseIdentifier: "Cell")
 
-        // 並び替えボタン
+        // 並び替えボタン(UIMenu付き)
         let sortButton = UIButton(type: .system)
         sortButton.setTitle("並び替え", for: .normal)
-        sortButton.menu = UIMenu(title: "並び替え", children: [
-            UIAction(title: "作成日", image: UIImage(systemName: "calendar")) { [weak self] _ in
-                self?.sortFlatData(by: .createdAt)
-            },
-            UIAction(title: "名前", image: UIImage(systemName: "textformat")) { [weak self] _ in
-                self?.sortFlatData(by: .title)
-            },
-            UIAction(title: "追加日", image: UIImage(systemName: "clock")) { [weak self] _ in
-                self?.sortFlatData(by: .currentDate)
-            },
-            UIAction(title: "順番", image: UIImage(systemName: "list.number")) { [weak self] _ in
-                self?.sortFlatData(by: .order)
-            }
-        ])
+
+        // メニュー生成用の関数
+        func makeSortMenu() -> UIMenu {
+            return UIMenu(title: "並び替え", children: [
+                UIAction(title: "作成日", image: UIImage(systemName: "calendar")) { [weak self] _ in
+                    self?.sortFlatData(by: .createdAt)
+                },
+                UIAction(title: "名前", image: UIImage(systemName: "textformat")) { [weak self] _ in
+                    self?.sortFlatData(by: .title)
+                },
+                UIAction(title: "追加日", image: UIImage(systemName: "clock")) { [weak self] _ in
+                    self?.sortFlatData(by: .currentDate)
+                },
+                UIAction(title: "順番", image: UIImage(systemName: "list.number")) { [weak self] _ in
+                    self?.sortFlatData(by: .order) // カンマは不要
+                },
+                UIAction(title: ascending ? "昇順" : "降順", image: UIImage(systemName: "arrow.up.arrow.down")) { [weak self] _ in
+                    guard let self = self else { return }
+                    self.ascending.toggle()
+                    self.sortFlatData(by: self.currentSort)
+                    sortButton.menu = makeSortMenu()
+                }
+            ])
+        }
+
+        sortButton.menu = makeSortMenu()
         sortButton.showsMenuAsPrimaryAction = true
         sortButton.heightAnchor.constraint(equalToConstant: 44).isActive = true
+
 
         // 検索フィールド
         let searchField = UITextField()
@@ -126,38 +241,36 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         searchField.addTarget(self, action: #selector(searchChanged(_:)), for: .editingChanged)
         searchField.heightAnchor.constraint(equalToConstant: 44).isActive = true
 
-        // StackView
+        // ヘッダースタックにボタンと検索フィールドを縦に並べる
         let headerStack = UIStackView(arrangedSubviews: [sortButton, searchField])
         headerStack.axis = .vertical
         headerStack.spacing = 8
         headerStack.alignment = .fill
         headerStack.distribution = .fill
 
-        // 高さを計算
+        // 高さを計算してframeに反映
         let fittingSize = CGSize(width: view.bounds.width, height: UIView.layoutFittingCompressedSize.height)
         let headerHeight = headerStack.systemLayoutSizeFitting(fittingSize).height
-
-        // frame 設定
         headerStack.frame = CGRect(x: 0, y: 0, width: view.bounds.width, height: headerHeight)
         tableView.tableHeaderView = headerStack
 
         view.addSubview(tableView)
     }
-    
+
+    // MARK: - 検索テキスト変更時
     @objc func searchChanged(_ sender: UITextField) {
         let text = sender.text ?? ""
         topSearchText = text
         updateFetchPredicate()
     }
-    
-    // MARK: - 検索用アクション
+
     @objc func topSearchChanged(_ sender: UITextField) {
         guard let text = sender.text else { return }
         print("上の検索: \(text)")
-        // ここで flatData をフィルタして tableView.reloadData()
+        // flatDataをフィルタしてtableView.reloadData()
     }
 
-    // MARK: - FRC
+    // MARK: - FRC（Core Data用フェッチコントローラ）設定
     func setupFRC() {
         let request: NSFetchRequest<MenuItemEntity> = MenuItemEntity.fetchRequest()
         request.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
@@ -191,7 +304,7 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         }
     }
 
-    // MARK: - Flatten
+    // MARK: - 階層をフラット化（展開状態を考慮）
     func flatten(_ items: [MenuItemEntity]) -> [MenuItemEntity] {
         var result: [MenuItemEntity] = []
         for item in items {
@@ -203,9 +316,8 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         }
         return result
     }
-    
-    
 
+    // MARK: - 下の検索テキスト変更
     @objc func bottomSearchChanged(_ sender: UITextField) {
         bottomSearchText = sender.text ?? ""
         updateFetchPredicate()
@@ -251,7 +363,7 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         return cell
     }
 
-    // MARK: - Context Menu
+    // MARK: - コンテキストメニュー
     func tableView(_ tableView: UITableView, contextMenuConfigurationForRowAt indexPath: IndexPath, point: CGPoint) -> UIContextMenuConfiguration? {
 
         let item = flatData[indexPath.row]
@@ -267,7 +379,7 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         }
     }
 
-    // MARK: - Hierarchy Helpers
+    // MARK: - 階層レベル計算
     func level(for item: MenuItemEntity) -> Int {
         var level = 0
         var current = item.parent
@@ -278,6 +390,7 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         return level
     }
 
+    // MARK: - 子フォルダ追加
     func addChildFolder(to parent: MenuItemEntity) {
         let newEntity = MenuItemEntity(context: context)
         newEntity.title = "新しいフォルダ"
@@ -298,6 +411,7 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         }
     }
 
+    // MARK: - 削除
     func delete(item: MenuItemEntity) {
         context.delete(item)
         do {
@@ -307,6 +421,7 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         }
     }
 
+    // MARK: - ルートフォルダ追加
     @objc func addRootFolder() {
         let newFolder = MenuItemEntity(context: context)
         newFolder.title = "新しいフォルダ"
