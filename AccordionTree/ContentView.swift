@@ -63,16 +63,51 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         setupTableView()       // テーブルビューの初期設定
         setupFRC()             // FRCの初期設定
         performFetchAndReload()// データを取得してフラット化
-        setupTableView()       // 再度テーブルビュー設定（ヘッダー更新など）
         
+        // 通常モードの右ボタン
+        setupNormalNavigationBar()
+        
+        sortFlatData(by: currentSort) // UserDefaults から復元してソート
+    }
+
+    
+    
+    @objc func deleteSelected() {
+        // 選択されたセルの削除処理をここに書く
+        print("選択セルを削除")
+    }
+
+    @objc func editSelected() {
+        // 選択されたセルの編集処理をここに書く
+        print("選択セルを編集")
+    }
+
+    
+    
+
+    func tableView(_ tableView: UITableView, didDeselectRowAt indexPath: IndexPath) {
+        if tableView.indexPathsForSelectedRows?.isEmpty ?? true {
+            setupNormalNavigationBar()
+        }
+    }
+
+    
+    func setupNormalNavigationBar() {
+        navigationItem.title = "無限アコーディオン"
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             barButtonSystemItem: .add,
             target: self,
             action: #selector(addRootFolder)
         )
-        
-        sortFlatData(by: currentSort) // UserDefaults から復元してソート
     }
+
+    func setupSelectionNavigationBar() {
+        navigationItem.title = "選択モード"
+        let deleteButton = UIBarButtonItem(title: "削除", style: .plain, target: self, action: #selector(deleteSelected))
+        let editButton = UIBarButtonItem(title: "編集", style: .plain, target: self, action: #selector(editSelected))
+        navigationItem.rightBarButtonItems = [deleteButton, editButton]
+    }
+
     
     // MARK: - 検索結果更新
     // 入力された検索文字列に基づき、フラット化されたデータを更新
@@ -325,6 +360,76 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
 
         view.addSubview(tableView)
     }
+    
+    // MARK: - 選択モード用ナビバー更新
+    func updateNavigationBarForSelectionMode(isSelecting: Bool) {
+        if isSelecting {
+            // 選択中は左にキャンセル、右にアクション
+            navigationItem.leftBarButtonItem = UIBarButtonItem(
+                title: "Cancel",
+                style: .plain,
+                target: self,
+                action: #selector(cancelSelection)
+            )
+            
+            navigationItem.rightBarButtonItems = [
+                UIBarButtonItem(
+                    title: "Like",
+                    style: .plain,
+                    target: self,
+                    action: #selector(likeSelected)
+                ),
+                UIBarButtonItem(
+                    title: "Check",
+                    style: .plain,
+                    target: self,
+                    action: #selector(checkSelected)
+                ),
+                UIBarButtonItem(
+                    title: "Transfer",
+                    style: .plain,
+                    target: self,
+                    action: #selector(transferSelected)
+                )
+            ]
+        } else {
+            // 通常モードに戻す
+            navigationItem.leftBarButtonItem = nil
+            navigationItem.rightBarButtonItem = UIBarButtonItem(
+                barButtonSystemItem: .add,
+                target: self,
+                action: #selector(addRootFolder)
+            )
+        }
+    }
+
+    // MARK: - 選択モードのアクション例
+    @objc func cancelSelection() {
+        tableView.setEditing(false, animated: true)
+        updateNavigationBarForSelectionMode(isSelecting: false)
+    }
+
+    @objc func likeSelected() {
+        let selected = tableView.indexPathsForSelectedRows?.map { flatData[$0.row] } ?? []
+        print("Like: \(selected.map { $0.title ?? "" })")
+    }
+
+    @objc func checkSelected() {
+        let selected = tableView.indexPathsForSelectedRows?.map { flatData[$0.row] } ?? []
+        print("Check: \(selected.map { $0.title ?? "" })")
+    }
+
+    @objc func transferSelected() {
+        let selected = tableView.indexPathsForSelectedRows?.map { flatData[$0.row] } ?? []
+        print("Transfer: \(selected.map { $0.title ?? "" })")
+    }
+
+    // MARK: - 選択モードに切り替え
+    func enterSelectionMode() {
+        tableView.setEditing(true, animated: true)
+        updateNavigationBarForSelectionMode(isSelecting: true)
+    }
+
 
     // MARK: - 検索テキスト変更時
     @objc func searchChanged(_ sender: UITextField) {
@@ -425,8 +530,11 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
             tableView.reloadRows(at: [indexPath], with: .none)
         } else {
             // 選択モードでない → 通常の遷移
-            //showDetail(for: item)
+            // showDetail(for: item)
         }
+
+        // 選択用ナビバーの切り替え
+        setupSelectionNavigationBar()
 
         tableView.deselectRow(at: indexPath, animated: true)
     }
