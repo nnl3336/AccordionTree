@@ -59,17 +59,19 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         super.viewDidLoad()
         view.backgroundColor = .white
         title = "無限アコーディオン"
-
+        
         setupTableView()       // テーブルビューの初期設定
         setupFRC()             // FRCの初期設定
         performFetchAndReload()// データを取得してフラット化
         setupTableView()       // 再度テーブルビュー設定（ヘッダー更新など）
-
+        
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             barButtonSystemItem: .add,
             target: self,
             action: #selector(addRootFolder)
         )
+        
+        sortFlatData(by: currentSort) // UserDefaults から復元してソート
     }
     
     // MARK: - 検索結果更新
@@ -158,40 +160,53 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
     }
 
     // MARK: - ソートタイプ定義
-    enum SortType {
+    enum SortType: String, CaseIterable {
         case createdAt
         case title
         case currentDate
         case order
     }
 
-    var currentSort: SortType = .createdAt
 
-    // MARK: - データをソート
+    var currentSort: SortType {
+        get {
+            if let raw = UserDefaults.standard.string(forKey: "currentSort"),
+               let type = SortType(rawValue: raw) {
+                return type
+            }
+            return .createdAt // デフォルト
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: "currentSort")
+        }
+    }
+    
+    // MARK: - 並べ替え処理
     func sortFlatData(by type: SortType) {
-        currentSort = type
+        currentSort = type // UserDefaults に自動保存
         
         switch type {
         case .createdAt:
-            flatData.sort { ($0.createdAt ?? Date()) < ($1.createdAt ?? Date()) }
-            tableView.isEditing = false
+            flatData.sort { ascending ? ($0.createdAt ?? Date()) < ($1.createdAt ?? Date()) : ($0.createdAt ?? Date()) > ($1.createdAt ?? Date()) }
         case .title:
-            flatData.sort { ($0.title ?? "") < ($1.title ?? "") }
-            tableView.isEditing = false
+            flatData.sort { ascending ? ($0.title ?? "") < ($1.title ?? "") : ($0.title ?? "") > ($1.title ?? "") }
         case .currentDate:
-            flatData.sort { ($0.currentDate ?? Date()) < ($1.currentDate ?? Date()) }
-            tableView.isEditing = false
+            flatData.sort { ascending ? ($0.currentDate ?? Date()) < ($1.currentDate ?? Date()) : ($0.currentDate ?? Date()) > ($1.currentDate ?? Date()) }
         case .order:
-            flatData.sort { $0.order < $1.order }
-            tableView.isEditing = true
+            flatData.sort { ascending ? $0.order < $1.order : $0.order > $1.order }
         }
         
+        tableView.isEditing = (type == .order)
         tableView.reloadData()
     }
 
     
     // 並べ替え昇順 / 降順用
-    var ascending: Bool = true  // ここを追加
+    // MARK: - 並び替え状態の永続化
+        var ascending: Bool {
+            get { UserDefaults.standard.bool(forKey: "ascending") }
+            set { UserDefaults.standard.set(newValue, forKey: "ascending") }
+        }
     
     // MARK: - テーブルビュー初期設定
     func setupTableView() {
@@ -204,9 +219,27 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         // 並び替えボタン(UIMenu付き)
         let sortButton = UIButton(type: .system)
         sortButton.setTitle("並び替え", for: .normal)
+        
+        // ← クラスの外に extension を置く
+        extension String {
+            func textToImage(font: UIFont = .systemFont(ofSize: 17)) -> UIImage? {
+                let size = self.size(withAttributes: [.font: font])
+                UIGraphicsBeginImageContextWithOptions(size, false, 0)
+                UIColor.label.set()
+                self.draw(at: .zero, withAttributes: [.font: font])
+                let image = UIGraphicsGetImageFromCurrentImageContext()
+                UIGraphicsEndImageContext()
+                return image
+            }
+        }
 
         // メニュー生成用の関数
         func makeSortMenu() -> UIMenu {
+            // アイコンを昇順なら「A」、降順なら「Z」に
+            let symbol = ascending ? "A" : "D"
+            let config = UIImage.SymbolConfiguration(pointSize: 16, weight: .bold)
+            let icon = symbol.textToImage(font: .systemFont(ofSize: 16, weight: .bold))
+
             return UIMenu(title: "並び替え", children: [
                 UIAction(title: "作成日", image: UIImage(systemName: "calendar")) { [weak self] _ in
                     self?.sortFlatData(by: .createdAt)
@@ -218,20 +251,16 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
                     self?.sortFlatData(by: .currentDate)
                 },
                 UIAction(title: "順番", image: UIImage(systemName: "list.number")) { [weak self] _ in
-                    self?.sortFlatData(by: .order) // カンマは不要
+                    self?.sortFlatData(by: .order)
                 },
-                UIAction(title: ascending ? "昇順" : "降順", image: UIImage(systemName: "arrow.up.arrow.down")) { [weak self] _ in
+                UIAction(title: ascending ? "昇順" : "降順", image: icon) { [weak self] _ in
                     guard let self = self else { return }
                     self.ascending.toggle()
                     self.sortFlatData(by: self.currentSort)
-                    sortButton.menu = makeSortMenu()
+                    self.updateTableHeader()   // メニュー更新
                 }
             ])
         }
-
-        sortButton.menu = makeSortMenu()
-        sortButton.showsMenuAsPrimaryAction = true
-        sortButton.heightAnchor.constraint(equalToConstant: 44).isActive = true
 
 
         // 検索フィールド
