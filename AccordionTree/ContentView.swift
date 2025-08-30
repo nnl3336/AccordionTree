@@ -37,7 +37,7 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
     var data: [MenuItem] = []
     
     // 表示用のフラットデータ
-    var flatData: [MenuItem] = []
+    var flatData: [MenuItemEntity] = []
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -88,32 +88,71 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         }
         return nil
     }
+    
+    func level(for item: MenuItemEntity) -> Int {
+        var level = 0
+        var current = item.parent
+        while current != nil {
+            level += 1
+            current = current?.parent
+        }
+        return level
+    }
+
+    func flatten(_ items: [MenuItemEntity]) -> [MenuItemEntity] {
+        var result: [MenuItemEntity] = []
+        for item in items {
+            result.append(item)
+            if item.isExpanded, let children = item.children?.allObjects as? [MenuItemEntity] {
+                result.append(contentsOf: flatten(children))
+            }
+        }
+        return result
+    }
 
     
-    func addChildFolder(to parentItem: MenuItem) {
+    func loadRoots() -> [MenuItemEntity] {
+        let request: NSFetchRequest<MenuItemEntity> = MenuItemEntity.fetchRequest()
+        request.predicate = NSPredicate(format: "parent == nil")
+        do {
+            return try context.fetch(request)
+        } catch {
+            print("fetch error: \(error)")
+            return []
+        }
+    }
+
+
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let item = flatData[indexPath.row]
+        let cell = tableView.dequeueReusableCell(withIdentifier: "Cell", for: indexPath)
+        cell.textLabel?.text = item.title
+        cell.indentationLevel = level(for: item)
+        cell.accessoryType = (item.children?.count ?? 0) > 0 ? .disclosureIndicator : .none
+        return cell
+    }
+
+    
+    func addChildFolder(to parent: MenuItemEntity) {
         let newEntity = MenuItemEntity(context: context)
         newEntity.title = "新しいフォルダ"
         newEntity.isExpanded = false
 
-        if let parentEntity = parentItem.entity {
-            newEntity.parent = parentEntity
-            parentEntity.addToChildren(newEntity)  // ← ここが重要
-        }
+        // 親子関係
+        parent.addToChildren(newEntity)
+        newEntity.parent = parent
 
         do {
             try context.save()
-
-            // UI 用 MenuItem にも追加
-            let newItem = MenuItem(title: newEntity.title ?? "", entity: newEntity)
-            parentItem.children.append(newItem)
-            parentItem.isExpanded = true
-
-            flatData = flatten(data)
+            flatData = flatten(loadRoots())
             tableView.reloadData()
         } catch {
-            print("保存に失敗: \(error)")
+            print("保存失敗: \(error)")
         }
     }
+
+
+
 
 
 
