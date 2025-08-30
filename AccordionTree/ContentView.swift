@@ -74,9 +74,12 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         newEntity.title = "新しいフォルダ"
         newEntity.isExpanded = false
 
-        // 親子関係を正しく設定（逆関係メソッドを使う）
+        // 親子関係
         parent.addToChildren(newEntity)
         newEntity.parent = parent
+
+        // 追加したら親を展開状態にする
+        parent.isExpanded = true
 
         do {
             try context.save()
@@ -84,6 +87,12 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
             data = loadRoots()
             flatData = flatten(data)
             tableView.reloadData()
+
+            // 追加した子の行までスクロールしたい場合
+            if let index = flatData.firstIndex(of: newEntity) {
+                tableView.scrollToRow(at: IndexPath(row: index, section: 0), at: .middle, animated: true)
+            }
+
         } catch {
             print("保存失敗: \(error)")
         }
@@ -218,12 +227,26 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let item = flatData[indexPath.row]
-        let cell = tableView.dequeueReusableCell(withIdentifier: "Cell", for: indexPath)
+        let cell = tableView.dequeueReusableCell(withIdentifier: "Cell", for: indexPath) as! AccordionCell
         cell.textLabel?.text = item.title
         cell.indentationLevel = level(for: item)
-        cell.accessoryType = (item.children?.count ?? 0) > 0 ? .disclosureIndicator : .none
+        cell.setExpanded(item.isExpanded)
+
+        // 矢印だけタップ
+        let tap = UITapGestureRecognizer(target: self, action: #selector(arrowTapped(_:)))
+        cell.arrowImageView.addGestureRecognizer(tap)
+        cell.arrowImageView.tag = indexPath.row
         return cell
     }
+
+    @objc func arrowTapped(_ sender: UITapGestureRecognizer) {
+        guard let row = sender.view?.tag else { return }
+        let item = flatData[row]
+        item.isExpanded.toggle()
+        flatData = flatten(data)
+        tableView.reloadData()
+    }
+
 
     // MARK: - UITableViewDelegate
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
@@ -250,7 +273,7 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         tableView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         tableView.delegate = self
         tableView.dataSource = self
-        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "Cell")
+        tableView.register(AccordionCell.self, forCellReuseIdentifier: "Cell") // ←ここ
         view.addSubview(tableView)
     }
 }
@@ -265,5 +288,32 @@ class MenuItem {
         self.title = title
         self.children = children
         self.entity = entity
+    }
+}
+
+class AccordionCell: UITableViewCell {
+    let arrowImageView = UIImageView()
+    
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: style, reuseIdentifier: reuseIdentifier)
+        setupArrow()
+    }
+    
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func setupArrow() {
+        arrowImageView.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(arrowImageView)
+        NSLayoutConstraint.activate([
+            arrowImageView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            arrowImageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            arrowImageView.widthAnchor.constraint(equalToConstant: 16),
+            arrowImageView.heightAnchor.constraint(equalToConstant: 16)
+        ])
+        arrowImageView.isUserInteractionEnabled = true
+    }
+
+    func setExpanded(_ expanded: Bool) {
+        arrowImageView.image = UIImage(systemName: expanded ? "chevron.down" : "chevron.right")
     }
 }
