@@ -4,7 +4,7 @@
         <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="currentDate" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="isExpanded" optional="YES" attributeType="Boolean" usesScalarValueType="YES"/>
-        <attribute name="order" optional="YES" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="order" optional="YES" attributeType="Integer 64" defaultValueString="0" usesScalarValueType="YES"/>
         <attribute name="title" optional="YES" attributeType="String"/>
         <relationship name="children" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="MenuItemEntity" inverseName="parent" inverseEntity="MenuItemEntity"/>
         <relationship name="parent" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="MenuItemEntity" inverseName="children" inverseEntity="MenuItemEntity"/>

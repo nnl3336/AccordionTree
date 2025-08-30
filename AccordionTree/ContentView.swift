@@ -135,6 +135,7 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
     }
 
     // MARK: - セルの移動可否
+    // セルを移動できるか
     func tableView(_ tableView: UITableView, canMoveRowAt indexPath: IndexPath) -> Bool {
         // 現在のソートが「順番」のときだけ移動可能
         return currentSort == .order
@@ -143,21 +144,31 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
     // MARK: - セル移動時の処理
     func tableView(_ tableView: UITableView, moveRowAt sourceIndexPath: IndexPath, to destinationIndexPath: IndexPath) {
         guard currentSort == .order else { return }
-        
+
+        // flatData を並び替え
         let movedItem = flatData.remove(at: sourceIndexPath.row)
         flatData.insert(movedItem, at: destinationIndexPath.row)
-        
+
         // 並び順(order)を更新
         for (index, item) in flatData.enumerated() {
-            item.order = Int16(index)
+            item.order = Int64(index)
         }
-        
+
         do {
             try context.save()
+            print("並び替え保存成功")
         } catch {
-            print("保存失敗: \(error)")
+            print("順序保存に失敗: \(error)")
         }
+
+        // デバッグ用に現在の順序を出力
+        print("=== 並び順デバッグ ===")
+        for item in flatData {
+            print("\(item.title ?? "無題") : order = \(item.order)")
+        }
+        print("====================")
     }
+
 
     // MARK: - ソートタイプ定義
     enum SortType: String, CaseIterable {
@@ -334,7 +345,7 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
     // MARK: - FRC（Core Data用フェッチコントローラ）設定
     func setupFRC() {
         let request: NSFetchRequest<MenuItemEntity> = MenuItemEntity.fetchRequest()
-        request.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
+        request.sortDescriptors = [NSSortDescriptor(key: "order", ascending: true)] // ← order順に
         request.predicate = NSPredicate(format: "parent == nil")
         
         fetchedResultsController = NSFetchedResultsController(
@@ -346,6 +357,18 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         fetchedResultsController.delegate = self
     }
 
+    // moveRowAt の実装
+
+    // FRC が変化した時（Core Data 更新時）
+    func controllerDidChangeContent(_ controller: NSFetchedResultsController<NSFetchRequestResult>) {
+        if let roots = controller.fetchedObjects as? [MenuItemEntity] {
+            // 展開状態を考慮して flatData を更新
+            flatData = flatten(roots)
+            tableView.reloadData()
+        }
+    }
+
+
     func performFetchAndReload() {
         do {
             try fetchedResultsController.performFetch()
@@ -355,13 +378,6 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
             }
         } catch {
             print("FRC fetch error: \(error)")
-        }
-    }
-
-    func controllerDidChangeContent(_ controller: NSFetchedResultsController<NSFetchRequestResult>) {
-        if let roots = controller.fetchedObjects as? [MenuItemEntity] {
-            flatData = flatten(roots)
-            tableView.reloadData()
         }
     }
 
