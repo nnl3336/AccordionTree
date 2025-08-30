@@ -68,6 +68,38 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         fatalError("init(coder:) has not been implemented")
     }
     
+    func toggleItem(_ item: MenuItemEntity) {
+        guard let row = flatData.firstIndex(of: item) else { return }
+        let children = (item.children?.allObjects as? [MenuItemEntity]) ?? []
+
+        item.isExpanded.toggle()
+
+        tableView.beginUpdates()
+        if item.isExpanded {
+            var indexPaths: [IndexPath] = []
+            for i in 0..<children.count {
+                indexPaths.append(IndexPath(row: row + i + 1, section: 0))
+            }
+            flatData.insert(contentsOf: children, at: row + 1)
+            tableView.insertRows(at: indexPaths, with: .fade)
+        } else {
+            let indexPaths = (1...children.count).map { IndexPath(row: row + $0, section: 0) }
+            flatData.removeSubrange((row + 1)...(row + children.count))
+            tableView.deleteRows(at: indexPaths, with: .fade)
+        }
+        tableView.endUpdates()
+
+        // 矢印の回転アニメーション
+        if let cell = tableView.cellForRow(at: IndexPath(row: row, section: 0)) as? AccordionCell {
+            UIView.animate(withDuration: 0.25) {
+                cell.arrowImageView.transform = item.isExpanded
+                    ? CGAffineTransform(rotationAngle: .pi/2)
+                    : .identity
+            }
+        }
+    }
+
+    
     func tableView(_ tableView: UITableView,
                    contextMenuConfigurationForRowAt indexPath: IndexPath,
                    point: CGPoint) -> UIContextMenuConfiguration? {
@@ -295,7 +327,7 @@ class AccordionCell: UITableViewCell {
 
     private func setupArrow() {
         arrowImageView.translatesAutoresizingMaskIntoConstraints = false
-        arrowImageView.image = UIImage(systemName: "chevron.right") // 初期は右向き
+        arrowImageView.image = UIImage(systemName: "chevron.right")
         arrowImageView.tintColor = .gray
         contentView.addSubview(arrowImageView)
 
@@ -308,12 +340,10 @@ class AccordionCell: UITableViewCell {
 
         arrowImageView.isUserInteractionEnabled = true
         let tap = UITapGestureRecognizer(target: self, action: #selector(arrowTapped))
-        tap.cancelsTouchesInView = false  // ← これが重要
         arrowImageView.addGestureRecognizer(tap)
-
     }
 
-    @objc private func arrowTapped() {
+    @objc private func arrowTapped(_ sender: UITapGestureRecognizer) {
         onArrowTapped?()
     }
 }
