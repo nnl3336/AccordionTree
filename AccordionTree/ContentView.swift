@@ -453,7 +453,7 @@ class AccordionViewController: UIViewController, UITableViewDelegate, NSFetchedR
         let text = sender.text ?? ""
         topSearchText = text
         updateFetchPredicate()
-    }
+    } 
 
     @objc func topSearchChanged(_ sender: UITextField) {
         guard let text = sender.text else { return }
