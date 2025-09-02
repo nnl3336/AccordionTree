@@ -178,7 +178,7 @@ class AccordionViewController: UIViewController, UITableViewDelegate, NSFetchedR
         
         // 並び順(order)を更新
         for (index, item) in flatData.enumerated() {
-            item.order = Int16(index)
+            item.orderIndex = Int64(index)
         }
         
         do {
@@ -222,7 +222,7 @@ class AccordionViewController: UIViewController, UITableViewDelegate, NSFetchedR
         case .currentDate:
             flatData.sort { ascending ? ($0.currentDate ?? Date()) < ($1.currentDate ?? Date()) : ($0.currentDate ?? Date()) > ($1.currentDate ?? Date()) }
         case .order:
-            flatData.sort { ascending ? $0.order < $1.order : $0.order > $1.order }
+            flatData.sort { ascending ? $0.orderIndex < $1.orderIndex : $0.orderIndex > $1.orderIndex }
         }
         
         tableView.isEditing = (type == .order)
@@ -464,7 +464,17 @@ class AccordionViewController: UIViewController, UITableViewDelegate, NSFetchedR
     // MARK: - FRC（Core Data用フェッチコントローラ）設定
     func setupFRC() {
         let request: NSFetchRequest<MenuItemEntity> = MenuItemEntity.fetchRequest()
-        request.sortDescriptors = [NSSortDescriptor(key: "title", ascending: true)]
+        switch currentSort {
+        case .order:
+            request.sortDescriptors = [NSSortDescriptor(key: "orderIndex", ascending: ascending)]
+        case .title:
+            request.sortDescriptors = [NSSortDescriptor(key: "title", ascending: ascending)]
+        case .createdAt:
+            request.sortDescriptors = [NSSortDescriptor(key: "createdAt", ascending: ascending)]
+        case .currentDate:
+            request.sortDescriptors = [NSSortDescriptor(key: "currentDate", ascending: ascending)]
+        }
+        
         request.predicate = NSPredicate(format: "parent == nil")
         
         fetchedResultsController = NSFetchedResultsController(
@@ -475,6 +485,9 @@ class AccordionViewController: UIViewController, UITableViewDelegate, NSFetchedR
         )
         fetchedResultsController.delegate = self
     }
+
+
+    
 
     func performFetchAndReload() {
         do {
@@ -761,9 +774,21 @@ extension AccordionViewController: UITableViewDropDelegate {
                 // UIの更新
                 tableView.moveRow(at: sourceIndexPath, to: destinationIndexPath)
             })
+
+            // 並び替え結果を Core Data に保存
+            for (index, entity) in flatData.enumerated() {
+                entity.orderIndex = Int64(index)
+            }
+            do {
+                try context.save()
+            } catch {
+                print("並び替え保存失敗: \(error)")
+            }
+
             coordinator.drop(item.dragItem, toRowAt: destinationIndexPath)
         }
     }
+
 
 }
 
