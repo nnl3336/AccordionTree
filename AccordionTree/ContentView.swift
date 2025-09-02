@@ -94,6 +94,13 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
     
     func setupNormalNavigationBar() {
         navigationItem.title = "無限アコーディオン"
+        
+        // まず右も左もクリア
+        navigationItem.rightBarButtonItem = nil
+        /*navigationItem.rightBarButtonItems = nil
+        navigationItem.leftBarButtonItem = nil*/
+        
+        // 新しい右ボタンをセット
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             barButtonSystemItem: .add,
             target: self,
@@ -101,11 +108,15 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         )
     }
 
+
     func setupSelectionNavigationBar() {
         navigationItem.title = "選択モード"
         let deleteButton = UIBarButtonItem(title: "削除", style: .plain, target: self, action: #selector(deleteSelected))
-        let editButton = UIBarButtonItem(title: "編集", style: .plain, target: self, action: #selector(editSelected))
-        navigationItem.rightBarButtonItems = [deleteButton, editButton]
+        // 左にキャンセル
+        let cancelButton = UIBarButtonItem(title: "キャンセル", style: .plain, target: self, action: #selector(cancelSelection))
+
+        //navigationItem.leftBarButtonItem = UIBarButtonItem(title: "キャンセル", style: .plain, target: self, action: #selector(cancelSelection))
+        navigationItem.rightBarButtonItems = [deleteButton/*, editButton*/, cancelButton]
     }
 
     
@@ -403,11 +414,16 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         }
     }
 
-    // MARK: - 選択モードのアクション例
+    // MARK: - キャンセル処理
     @objc func cancelSelection() {
-        tableView.setEditing(false, animated: true)
-        updateNavigationBarForSelectionMode(isSelecting: false)
+        // 選択解除
+        selectedItems.removeAll()
+        tableView.reloadData()
+        
+        // ナビバーを通常モードに戻す
+        setupNormalNavigationBar()
     }
+    
 
     @objc func likeSelected() {
         let selected = tableView.indexPathsForSelectedRows?.map { flatData[$0.row] } ?? []
@@ -514,29 +530,38 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         return flatData.count
     }
     
-    //セルタップ
+    // MARK: - セルタップ
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         let item = flatData[indexPath.row]
 
+        // 選択モード中 → トグル
         if !selectedItems.isEmpty {
-            // 選択モード中 → トグル
-            if selectedItems.contains(item) {
-                selectedItems.remove(item)
-            } else {
-                selectedItems.insert(item)
-            }
-
-            // 色を更新
-            tableView.reloadRows(at: [indexPath], with: .none)
+            toggleSelection(item: item, indexPath: indexPath)
         } else {
             // 選択モードでない → 通常の遷移
             // showDetail(for: item)
         }
 
-        // 選択用ナビバーの切り替え
-        setupSelectionNavigationBar()
-
         tableView.deselectRow(at: indexPath, animated: true)
+    }
+    
+    // MARK: - セル選択のトグル処理
+    func toggleSelection(item: MenuItemEntity, indexPath: IndexPath) {
+        if selectedItems.contains(item) {
+            selectedItems.remove(item)
+        } else {
+            selectedItems.insert(item)
+        }
+
+        // ナビバー更新
+        if selectedItems.isEmpty {
+            setupNormalNavigationBar()
+        } else {
+            setupSelectionNavigationBar()
+        }
+
+        // セル見た目更新
+        tableView.reloadRows(at: [indexPath], with: .none)
     }
 
 
@@ -574,7 +599,15 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         return cell
     }
 
-    var selectedItems = Set<MenuItemEntity>()
+    var selectedItems = Set<MenuItemEntity>() {
+        didSet {
+            if selectedItems.isEmpty {
+                setupNormalNavigationBar()  // これで右のボタンもキャンセルも消す
+            } else {
+                setupSelectionNavigationBar()
+            }
+        }
+    }
 
     // MARK: - コンテキストメニュー　.contextMenu
     func tableView(_ tableView: UITableView,
@@ -606,7 +639,7 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
             }
 
             // 選択/トグルアクション
-            let selectAction = UIAction(title: "選択/トグル") { _ in
+            let selectAction = UIAction(title: "選択") { _ in
                 if self.selectedItems.isEmpty {
                     self.selectedItems.insert(item)   // 最初の選択
                 } else {
@@ -616,6 +649,12 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
                         self.selectedItems.insert(item)  // トグルで追加
                     }
                 }
+                self.setupSelectionNavigationBar()
+                
+                if self.selectedItems.isEmpty {
+                    self.setupNormalNavigationBar()
+                }
+
                 tableView.reloadRows(at: [indexPath], with: .none)
             }
 
@@ -713,22 +752,36 @@ class AccordionCell: UITableViewCell {
     }
 
     private func setupArrow() {
+        let arrowContainer = UIView()
+        arrowContainer.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(arrowContainer)
+
+        arrowContainer.addSubview(arrowImageView)
         arrowImageView.translatesAutoresizingMaskIntoConstraints = false
         arrowImageView.image = UIImage(systemName: "chevron.right")
         arrowImageView.tintColor = .gray
-        contentView.addSubview(arrowImageView)
 
+        // arrowImageView の位置だけ指定
         NSLayoutConstraint.activate([
-            arrowImageView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-            arrowImageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            arrowImageView.centerYAnchor.constraint(equalTo: arrowContainer.centerYAnchor),
+            arrowImageView.centerXAnchor.constraint(equalTo: arrowContainer.centerXAnchor),
             arrowImageView.widthAnchor.constraint(equalToConstant: 16),
             arrowImageView.heightAnchor.constraint(equalToConstant: 16)
         ])
 
-        arrowImageView.isUserInteractionEnabled = true
+        // arrowContainer の位置とタップ領域を広くする
+        NSLayoutConstraint.activate([
+            arrowContainer.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            arrowContainer.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            arrowContainer.widthAnchor.constraint(equalToConstant: 44),  // 推奨44pt以上
+            arrowContainer.heightAnchor.constraint(equalToConstant: 44)
+        ])
+
+        arrowContainer.isUserInteractionEnabled = true
         let tap = UITapGestureRecognizer(target: self, action: #selector(arrowTapped))
-        arrowImageView.addGestureRecognizer(tap)
+        arrowContainer.addGestureRecognizer(tap)
     }
+
 
     @objc private func arrowTapped(_ sender: UITapGestureRecognizer) {
         onArrowTapped?()
