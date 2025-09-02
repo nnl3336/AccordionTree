@@ -7,28 +7,9 @@
 
 import SwiftUI
 import CoreData
-
-import SwiftUI
 import UIKit
 
-struct ContentView: UIViewControllerRepresentable {
-    @Environment(\.managedObjectContext) private var viewContext
-
-    func makeUIViewController(context: Context) -> UINavigationController {
-        let accordionVC = AccordionViewController(context: viewContext)
-        let nav = UINavigationController(rootViewController: accordionVC)
-        return nav
-    }
-
-    func updateUIViewController(_ uiViewController: UINavigationController, context: Context) {}
-}
-
-
-
-import UIKit
-import CoreData
-
-class AccordionViewController: UIViewController, UITableViewDelegate, UITableViewDataSource, NSFetchedResultsControllerDelegate {
+class AccordionViewController: UIViewController, UITableViewDelegate, NSFetchedResultsControllerDelegate {
 
     var context: NSManagedObjectContext
     let tableView = UITableView()
@@ -41,6 +22,8 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
     // 検索文字列
     var topSearchText: String = ""
     var bottomSearchText: String = ""
+
+    var isReorderMode = false
 
     // MARK: - 初期化
     // コンテキストを受け取ってビューコントローラを初期化
@@ -277,6 +260,8 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
 
         tableView.tableHeaderView = container
     }
+    
+    
 
     // メニュー生成用の関数
     func makeSortMenu() -> UIMenu {
@@ -305,14 +290,25 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
                 self?.sortFlatData(by: .currentDate)
                 self?.updateTableHeader()
             },
-            UIAction(
+            /*UIAction(
                 title: "順番",
                 image: UIImage(systemName: "list.number"),
-                state: currentSort == .order ? .on : .off
+                state: isReorderMode ? .on : .off
             ) { [weak self] _ in
-                self?.sortFlatData(by: .order)
-                self?.updateTableHeader()
+                guard let self = self else { return }
+                self.isReorderMode.toggle()
+                self.tableView.reloadData()
             },
+            */
+             UIAction(
+                 title: "順番",
+                 image: UIImage(systemName: "list.number"),
+                 state: currentSort == .order ? .on : .off
+             ) { [weak self] _ in
+                 self?.sortFlatData(by: .order)
+                 self?.updateTableHeader()
+             },
+             
             // 昇順／降順の切り替えはタイトルで表現
             UIAction(
                 title: ascending ? "昇順 (A→Z)" : "降順 (Z→A)",
@@ -335,6 +331,11 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
         tableView.delegate = self
         tableView.dataSource = self
         tableView.register(AccordionCell.self, forCellReuseIdentifier: "Cell")
+        
+        tableView.dragInteractionEnabled = true   // iPhoneでもドラッグ有効化
+        tableView.dragDelegate = self
+        tableView.dropDelegate = self
+
 
         // 並び替えボタン(UIMenu付き)
         let sortButton = UIButton(type: .system)
@@ -725,6 +726,47 @@ class AccordionViewController: UIViewController, UITableViewDelegate, UITableVie
     }
 }
 
+extension AccordionViewController: UITableViewDataSource {
+}
+extension AccordionViewController: UITableViewDragDelegate {
+    //ドラッグアイテムを返す
+    func tableView(_ tableView: UITableView,
+                   itemsForBeginning session: UIDragSession,
+                   at indexPath: IndexPath) -> [UIDragItem] {
+        guard currentSort == .order else { return [] } // 並び替えモード以外はドラッグ不可
+
+        let item = flatData[indexPath.row]
+        let itemProvider = NSItemProvider(object: (item.title ?? "") as NSString)
+        let dragItem = UIDragItem(itemProvider: itemProvider)
+        dragItem.localObject = item
+        return [dragItem]
+    }
+
+}
+extension AccordionViewController: UITableViewDropDelegate {
+    //並び替え処理
+    func tableView(_ tableView: UITableView,
+                   performDropWith coordinator: UITableViewDropCoordinator) {
+        guard currentSort == .order else { return }
+
+        if let item = coordinator.items.first,
+           let sourceIndexPath = item.sourceIndexPath,
+           let destinationIndexPath = coordinator.destinationIndexPath {
+
+            tableView.performBatchUpdates({
+                // データの並べ替え
+                let movedItem = flatData.remove(at: sourceIndexPath.row)
+                flatData.insert(movedItem, at: destinationIndexPath.row)
+
+                // UIの更新
+                tableView.moveRow(at: sourceIndexPath, to: destinationIndexPath)
+            })
+            coordinator.drop(item.dragItem, toRowAt: destinationIndexPath)
+        }
+    }
+
+}
+
 class MenuItem {
     let title: String
     var children: [MenuItem] = []
@@ -786,4 +828,16 @@ class AccordionCell: UITableViewCell {
     @objc private func arrowTapped(_ sender: UITapGestureRecognizer) {
         onArrowTapped?()
     }
+}
+
+struct ContentView: UIViewControllerRepresentable {
+    @Environment(\.managedObjectContext) private var viewContext
+
+    func makeUIViewController(context: Context) -> UINavigationController {
+        let accordionVC = AccordionViewController(context: viewContext)
+        let nav = UINavigationController(rootViewController: accordionVC)
+        return nav
+    }
+
+    func updateUIViewController(_ uiViewController: UINavigationController, context: Context) {}
 }
